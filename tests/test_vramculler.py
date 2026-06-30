@@ -215,6 +215,44 @@ class TestDetection(IsolatedEnv):
         self.assertEqual(len(vc.filter_games(games, "nope")), 0)
 
 
+class TestSteamProbing(IsolatedEnv):
+    def _names(self):
+        return [str(p) for p in vc.steam_path_candidates()]
+
+    def test_linux_candidates_cover_selected_distros(self):
+        os.environ.pop("XDG_DATA_HOME", None)
+        names = self._names()
+        # native pkg (Arch/CachyOS, Fedora, Debian/Ubuntu)
+        self.assertTrue(any(n.endswith("/.local/share/Steam") for n in names))
+        # Flatpak
+        self.assertTrue(any("com.valvesoftware.Steam" in n for n in names))
+        # Ubuntu Snap
+        self.assertTrue(any("snap/steam/common" in n for n in names))
+        # older Debian layout
+        self.assertTrue(any("debian-installation" in n for n in names))
+
+    def test_xdg_data_home_override(self):
+        custom = self.base / "customdata"
+        os.environ["XDG_DATA_HOME"] = str(custom)
+        names = self._names()
+        self.assertIn(str(custom / "Steam"), names)
+
+    def test_symlinked_steam_root_not_double_counted(self):
+        # ~/.local/share/Steam real; ~/.steam/steam -> it. Dedup by resolve().
+        home = Path(os.environ["HOME"])
+        real = home / ".local/share/Steam"
+        (real / "steamapps").mkdir(parents=True)
+        steamdir = home / ".steam"
+        steamdir.mkdir(parents=True, exist_ok=True)
+        try:
+            (steamdir / "steam").symlink_to(real)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks not supported on this platform")
+        libs = vc.enumerate_libraries(real, _silent_console())
+        # only one library despite the symlink alias
+        self.assertEqual(len(libs), 1)
+
+
 class TestApplyUnrealProton(IsolatedEnv):
     def setUp(self):
         super().setUp()

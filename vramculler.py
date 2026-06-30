@@ -280,12 +280,18 @@ def steam_path_candidates() -> list[Path]:
                 cands.append(Path(base) / "Steam")
         cands.append(Path("C:/Program Files (x86)/Steam"))
     elif osname == "linux":
+        # Respect a customized XDG_DATA_HOME (some Arch/CachyOS setups move it).
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        if xdg_data:
+            cands.append(Path(xdg_data) / "Steam")
         cands += [
-            home / ".local/share/Steam",
-            home / ".steam/steam",
+            home / ".local/share/Steam",            # native pkg (Arch/CachyOS, Fedora, Debian/Ubuntu)
+            home / ".steam/steam",                  # symlink -> the above on most distros
             home / ".steam/root",
+            home / ".steam/debian-installation",    # older Debian/Ubuntu .deb layout
             home / ".var/app/com.valvesoftware.Steam/.local/share/Steam",  # Flatpak
-            home / ".var/app/com.valvesoftware.Steam/data/Steam",
+            home / ".var/app/com.valvesoftware.Steam/data/Steam",          # Flatpak (older)
+            home / "snap/steam/common/.local/share/Steam",                 # Ubuntu Snap
         ]
     elif osname == "darwin":
         cands.append(home / "Library/Application Support/Steam")

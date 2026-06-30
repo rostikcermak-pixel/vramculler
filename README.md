@@ -112,11 +112,14 @@ vramculler.py [--steam-path PATH] [--profile {conservative,balanced,aggressive}]
 | `--quiet-banner` | Suppress the ASCII banner. |
 | `--version` | Print the version and exit. |
 
-vramculler probes the usual Steam locations automatically (native packages,
-Flatpak `~/.var/app/com.valvesoftware.Steam`, `~/.steam`, `~/.local/share/Steam`
-on Linux; `Program Files (x86)\Steam` on Windows). Use `--steam-path` to point
-at a specific library root; the path is saved for next time. Multiple libraries
-declared in `libraryfolders.vdf` are all scanned.
+vramculler probes the usual Steam locations automatically. On Linux that's the
+native package path (`~/.local/share/Steam` / `~/.steam`, used by Arch/CachyOS,
+Fedora and Debian/Ubuntu), a customized `$XDG_DATA_HOME`, Flatpak
+(`~/.var/app/com.valvesoftware.Steam`), the older Debian `debian-installation`
+layout, and Ubuntu Snap (`~/snap/steam/common/...`); on Windows it's
+`Program Files (x86)\Steam`. Use `--steam-path` to point at a specific library
+root; the path is saved for next time. Multiple libraries declared in
+`libraryfolders.vdf` are all scanned.
 
 ### 1. Audit first (no changes)
 
