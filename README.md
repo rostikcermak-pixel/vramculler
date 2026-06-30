@@ -95,9 +95,22 @@ file isn't writable it is skipped and reported, never escalated.
 
 ```text
 vramculler.py [--steam-path PATH] [--profile {conservative,balanced,aggressive}]
-              [--report-only] [--dry-run] [--restore]
-              [--no-rich] [--quiet-banner]
+              [--game NAME|APPID] [--report-only] [--dry-run] [--restore]
+              [--no-rich] [--quiet] [--quiet-banner] [--version]
 ```
+
+| Flag | Purpose |
+| --- | --- |
+| `--steam-path PATH` | Point at a Steam root (contains `steamapps/`). Saved for next time. |
+| `--profile` | `conservative` / `balanced` (default) / `aggressive`. |
+| `--game NAME\|APPID` | Only act on games whose appid matches exactly or whose name contains this substring. |
+| `--report-only` | Audit only — no changes, formatted for screenshotting. |
+| `--dry-run` | Show intended changes (incl. backups) but modify nothing. |
+| `--restore` | Revert all changes from backups. |
+| `--quiet` | Suppress per-game debug lines (keep the summary table). |
+| `--no-rich` | Force ANSI output even if `rich` is installed. |
+| `--quiet-banner` | Suppress the ASCII banner. |
+| `--version` | Print the version and exit. |
 
 vramculler probes the usual Steam locations automatically (native packages,
 Flatpak `~/.var/app/com.valvesoftware.Steam`, `~/.steam`, `~/.local/share/Steam`
@@ -193,6 +206,23 @@ Verbose debug output is **on by default**. Per game it prints:
 - Set any cvar/launch option that could raise VAC concerns
 - Guess undocumented engine keys
 - Require or use admin/root, or write to files you don't own
+
+---
+
+## Development & tests
+
+vramculler ships with a stdlib-only test suite that builds synthetic Steam
+install trees (two libraries, one game per supported engine, a Proton prefix) in
+a temp dir, so the full detect → apply → verify → restore pipeline is tested
+**without a real Steam install** — handy if you can't get to your gaming rig.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+CI (GitHub Actions) runs the suite on **Linux and Windows** across Python
+3.10–3.12, with and without the optional `rich` dependency — cross-platform
+coverage you can't get on a single machine.
 
 ---
 

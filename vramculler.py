@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+__version__ = "0.1.0"
+
 # --------------------------------------------------------------------------- #
 # Optional rich
 # --------------------------------------------------------------------------- #
@@ -100,9 +102,10 @@ class C:
 class Console:
     """Thin output wrapper. Uses rich if available, else ANSI."""
 
-    def __init__(self, use_rich: bool = True):
+    def __init__(self, use_rich: bool = True, quiet: bool = False):
         self.use_rich = bool(use_rich and _HAVE_RICH)
         self._rich = _RichConsole() if self.use_rich else None
+        self.quiet = quiet
 
     def print(self, text: str = "") -> None:
         print(text)
@@ -142,6 +145,8 @@ class Console:
         self.print(C.wrap("✘ ", C.RED) + C.wrap(msg, C.RED))
 
     def debug(self, msg: str) -> None:
+        if self.quiet:
+            return
         self.print(C.wrap("    ┄ " + msg, C.DIM, C.GREY))
 
 
@@ -1067,8 +1072,18 @@ def resolve_steam_path(args, console: Console) -> Optional[Path]:
     return None
 
 
+def filter_games(games: list[GameInfo], selector: str) -> list[GameInfo]:
+    """Filter games by exact appid or case-insensitive substring of the name."""
+    sel = selector.strip().lower()
+    out = []
+    for gi in games:
+        if gi.appid == selector.strip() or sel in gi.name.lower():
+            out.append(gi)
+    return out
+
+
 def run(args) -> int:
-    console = Console(use_rich=not args.no_rich)
+    console = Console(use_rich=not args.no_rich, quiet=getattr(args, "quiet", False))
     if not args.quiet_banner:
         console.banner()
     console.print(C.wrap(
@@ -1102,6 +1117,12 @@ def run(args) -> int:
         console.info(f"library: {lib}")
     games = enumerate_games(libraries, console)
     console.info(f"installed games found: {C.wrap(str(len(games)), C.BOLD)}")
+    if getattr(args, "game", None):
+        matched = filter_games(games, args.game)
+        console.info(f"filter '{args.game}': {len(matched)} of {len(games)} game(s) match")
+        if not matched:
+            console.warn(f"no installed game matches '{args.game}' (appid or name substring)")
+        games = matched
     console.print()
 
     for gi in games:
@@ -1176,9 +1197,12 @@ def build_parser() -> argparse.ArgumentParser:
                     "texture quality). Not a texture compressor; unrelated to NVIDIA NTC.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("--version", action="version", version=f"vramculler {__version__}")
     p.add_argument("--steam-path", help="Path to a Steam root (contains steamapps/). Saved for next time.")
     p.add_argument("--profile", choices=list(PROFILES.keys()), default=DEFAULT_PROFILE,
                    help=f"Tweak aggressiveness (default: {DEFAULT_PROFILE}).")
+    p.add_argument("--game", metavar="NAME|APPID",
+                   help="Only act on games whose appid matches exactly or whose name contains this substring.")
     p.add_argument("--report-only", action="store_true",
                    help="Audit only: list games/OS/runtime/engine and what would be tweaked. No changes.")
     p.add_argument("--dry-run", action="store_true",
@@ -1186,6 +1210,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--restore", action="store_true",
                    help="Revert all changes from vramculler backups.")
     p.add_argument("--no-rich", action="store_true", help="Force ANSI output even if rich is installed.")
+    p.add_argument("--quiet", action="store_true", help="Suppress per-game debug lines (keep summary).")
     p.add_argument("--quiet-banner", action="store_true", help="Suppress the ASCII banner.")
     return p
 
