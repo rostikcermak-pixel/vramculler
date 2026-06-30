@@ -76,14 +76,46 @@ Edit the dict to retune for a different card.
 
 ## Install
 
-Requires **Python 3.10+**. Pure standard library; `rich` is an optional extra
-for prettier tables (it degrades gracefully to ANSI when absent).
+Requires **Python 3.10+** (ships with most Linux distros, SteamOS, and the
+Steam Deck). Pure standard library — nothing to `pip install`. `rich` is an
+optional extra for prettier tables (it degrades gracefully to ANSI when absent).
+
+### Quick install (Linux / Steam Deck) — one command
+
+Installs `vramculler` as a command in `~/.local/bin` (no root, no
+`steamos-readonly disable`; everything stays in your home dir):
 
 ```bash
+mkdir -p ~/.local/bin && \
+curl -L -o ~/.local/bin/vramculler \
+  https://raw.githubusercontent.com/rostikcermak-pixel/vramculler/main/vramculler.py && \
+chmod +x ~/.local/bin/vramculler && \
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc || \
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+Open a new terminal (or `source ~/.bashrc`), then just run:
+
+```bash
+vramculler          # no flags -> interactive menu, auto-detects all games
+```
+
+> **Steam Deck:** do this in Desktop Mode → Konsole. It auto-finds Steam at
+> `~/.local/share/Steam` and reads microSD libraries from `libraryfolders.vdf`.
+
+### Or grab the single file / clone
+
+```bash
+# single file
+curl -LO https://raw.githubusercontent.com/rostikcermak-pixel/vramculler/main/vramculler.py
+python3 vramculler.py
+
+# or the whole repo
 git clone https://github.com/rostikcermak-pixel/vramculler.git
-cd vramculler
+cd vramculler && python3 vramculler.py
+
 # optional, nicer output:
-pip install rich
+pip install --user rich
 ```
 
 No admin/root needed — vramculler only writes user-owned files. If a target
