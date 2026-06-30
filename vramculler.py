@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, Optional
 
+__version__ = "0.1.0"
+
 # --------------------------------------------------------------------------- #
 # Optional rich
 # --------------------------------------------------------------------------- #
@@ -100,9 +102,10 @@ class C:
 class Console:
     """Thin output wrapper. Uses rich if available, else ANSI."""
 
-    def __init__(self, use_rich: bool = True):
+    def __init__(self, use_rich: bool = True, quiet: bool = False):
         self.use_rich = bool(use_rich and _HAVE_RICH)
         self._rich = _RichConsole() if self.use_rich else None
+        self.quiet = quiet
 
     def print(self, text: str = "") -> None:
         print(text)
@@ -142,6 +145,8 @@ class Console:
         self.print(C.wrap("✘ ", C.RED) + C.wrap(msg, C.RED))
 
     def debug(self, msg: str) -> None:
+        if self.quiet:
+            return
         self.print(C.wrap("    ┄ " + msg, C.DIM, C.GREY))
 
 
@@ -275,12 +280,18 @@ def steam_path_candidates() -> list[Path]:
                 cands.append(Path(base) / "Steam")
         cands.append(Path("C:/Program Files (x86)/Steam"))
     elif osname == "linux":
+        # Respect a customized XDG_DATA_HOME (some Arch/CachyOS setups move it).
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        if xdg_data:
+            cands.append(Path(xdg_data) / "Steam")
         cands += [
-            home / ".local/share/Steam",
-            home / ".steam/steam",
+            home / ".local/share/Steam",            # native pkg (Arch/CachyOS, Fedora, Debian/Ubuntu)
+            home / ".steam/steam",                  # symlink -> the above on most distros
             home / ".steam/root",
+            home / ".steam/debian-installation",    # older Debian/Ubuntu .deb layout
             home / ".var/app/com.valvesoftware.Steam/.local/share/Steam",  # Flatpak
-            home / ".var/app/com.valvesoftware.Steam/data/Steam",
+            home / ".var/app/com.valvesoftware.Steam/data/Steam",          # Flatpak (older)
+            home / "snap/steam/common/.local/share/Steam",                 # Ubuntu Snap
         ]
     elif osname == "darwin":
         cands.append(home / "Library/Application Support/Steam")
@@ -1067,8 +1078,202 @@ def resolve_steam_path(args, console: Console) -> Optional[Path]:
     return None
 
 
+def filter_games(games: list[GameInfo], selector: str) -> list[GameInfo]:
+    """Filter games by exact appid or case-insensitive substring of the name."""
+    sel = selector.strip().lower()
+    out = []
+    for gi in games:
+        if gi.appid == selector.strip() or sel in gi.name.lower():
+            out.append(gi)
+    return out
+
+
+def populate_report(gi: GameInfo, profile: dict[str, Any]) -> None:
+    """Fill in intended target/action/effect for audit views without writing."""
+    if gi.engine == "unreal":
+        gi.config_target = resolve_unreal_engine_ini(gi)
+        gi.action = "would-tweak" if gi.config_target else "skip"
+        gi.effect = ("set r.Streaming.PoolSize / LimitPoolSizeToVRAM"
+                     if gi.config_target else "no UE config path")
+    elif gi.engine == "source":
+        gi.config_target = resolve_source_autoexec(gi)
+        gi.action = "would-tweak"
+        gi.effect = f"set mat_picmip {profile['source_mat_picmip']}"
+    elif gi.engine == "source2":
+        gi.action = "manual"
+        gi.effect = "set texture quality in-game (no safe cfg knob)"
+    elif gi.engine == "unity":
+        gi.action = "skip"
+        gi.effect = "no safe config tweak available"
+    else:
+        gi.action = "skip"
+        gi.effect = "unsupported engine"
+
+
+def apply_one(gi: GameInfo, profile: dict[str, Any], console: Console, dry: bool) -> None:
+    """Dispatch a single game to its engine handler."""
+    console.print(C.wrap(f"▸ {gi.name}", C.BOLD, C.PINK))
+    if gi.engine == "unreal":
+        apply_unreal(gi, profile, console, dry=dry)
+    elif gi.engine == "source":
+        apply_source(gi, profile, console, dry=dry)
+    elif gi.engine == "source2":
+        handle_source2(gi, profile, console)
+    elif gi.engine == "unity":
+        handle_unity(gi, console)
+    else:
+        handle_unknown(gi, console)
+
+
+# --------------------------------------------------------------------------- #
+# Interactive menu
+# --------------------------------------------------------------------------- #
+ENGINE_COLOR = {
+    "unreal": C.MAGENTA,
+    "source": C.CYAN,
+    "source2": C.BLUE,
+    "unity": C.YELLOW,
+    "unknown": C.GREY,
+}
+
+
+def _menu_list_games(games: list[GameInfo], console: Console) -> None:
+    console.rule("DETECTED GAMES")
+    actionable = {"unreal", "source"}
+    for i, gi in enumerate(games, 1):
+        col = ENGINE_COLOR.get(gi.engine, C.GREY)
+        eng = gi.engine + (f":{gi.engine_detail}"
+                           if gi.engine_detail and not gi.engine_detail.startswith("(") else "")
+        mark = C.wrap("●", C.GREEN) if gi.engine in actionable else C.wrap("○", C.GREY)
+        num = C.wrap(f"{i:>2}", C.BOLD, C.PINK)
+        rt = C.wrap(f"{host_os()}/{gi.runtime}", C.DIM, C.GREY)
+        console.print(f"  {num} {mark} {C.wrap(gi.name, C.BOLD)}  {rt}  {C.wrap(eng, col)}")
+    console.print()
+    console.print(C.wrap("  ● = has a safe VRAM knob   ○ = skipped (no safe tweak)", C.DIM, C.GREY))
+    console.print()
+
+
+def _parse_selection(raw: str, n: int) -> Optional[list[int]]:
+    """Parse '1,3,5', '2-4', 'all'/'a' into a 0-based index list. None = bad."""
+    raw = raw.strip().lower()
+    if raw in ("a", "all", "*"):
+        return list(range(n))
+    idx: set[int] = set()
+    for part in raw.replace(" ", "").split(","):
+        if not part:
+            continue
+        if "-" in part:
+            try:
+                lo, hi = part.split("-", 1)
+                for v in range(int(lo), int(hi) + 1):
+                    if 1 <= v <= n:
+                        idx.add(v - 1)
+            except ValueError:
+                return None
+        else:
+            try:
+                v = int(part)
+            except ValueError:
+                return None
+            if 1 <= v <= n:
+                idx.add(v - 1)
+    return sorted(idx)
+
+
+def _prompt(console: Console, msg: str) -> str:
+    try:
+        return input(C.wrap("  ❯ ", C.BOLD, C.PINK) + msg + " ").strip()
+    except EOFError:
+        return "q"
+
+
+def interactive_menu(games: list[GameInfo], steam_root: Path, libraries: list[Path],
+                     console: Console, profile_name: str) -> int:
+    """Drive detection results through a numbered, stdlib-only menu."""
+    if not games:
+        console.warn("no games detected - nothing to show in the menu.")
+        return 0
+
+    while True:
+        console.print()
+        _menu_list_games(games, console)
+        console.print(C.wrap("  Actions:", C.BOLD, C.CYAN))
+        console.print("    [number(s)]  select games to tweak (e.g. 1,3 or 2-5 or 'all')")
+        console.print(f"    [p] profile (current: {C.wrap(profile_name, C.BOLD, C.PINK)})    "
+                      "[v] restore/undo all    [q] quit")
+        console.print()
+        choice = _prompt(console, "select:")
+
+        if choice in ("q", "quit", ""):
+            console.info("bye.")
+            return 0
+
+        if choice == "p":
+            names = list(PROFILES.keys())
+            console.print("  profiles: " + ", ".join(
+                f"{C.wrap(str(i + 1), C.BOLD)}={n}" for i, n in enumerate(names)))
+            sel = _prompt(console, "choose profile number (or name):")
+            chosen = None
+            if sel.isdigit() and 1 <= int(sel) <= len(names):
+                chosen = names[int(sel) - 1]
+            elif sel in PROFILES:
+                chosen = sel
+            if chosen:
+                profile_name = chosen
+                console.good(f"profile set to {profile_name}")
+            else:
+                console.warn("unrecognized profile; unchanged.")
+            continue
+
+        if choice in ("v", "restore", "undo"):
+            confirm = _prompt(console, "restore ALL changes from backups? [y/N]:")
+            if confirm.lower() in ("y", "yes"):
+                console.rule("RESTORE")
+                n = restore_all(steam_root, libraries, games, console, dry=False)
+                console.good(f"restore complete: {n} file(s) restored")
+            else:
+                console.info("restore cancelled.")
+            continue
+
+        picks = _parse_selection(choice, len(games))
+        if picks is None:
+            console.warn("could not parse that selection - try e.g. 1,3 or 2-5 or 'all'.")
+            continue
+        if not picks:
+            console.warn("nothing selected.")
+            continue
+
+        selected = [games[i] for i in picks]
+        console.print()
+        console.info("selected: " + ", ".join(C.wrap(g.name, C.BOLD) for g in selected))
+        mode = _prompt(console, "[d]ry-run preview, [a]pply for real, or [c]ancel?")
+        mode = mode.lower()
+        if mode in ("c", "cancel", "q", ""):
+            console.info("cancelled.")
+            continue
+        dry = mode in ("d", "dry", "dry-run")
+        if not dry and mode not in ("a", "apply"):
+            console.warn("unrecognized; cancelling this round.")
+            continue
+        if not dry:
+            confirm = _prompt(console, f"apply '{profile_name}' tweaks to {len(selected)} game(s) for REAL? [y/N]:")
+            if confirm.lower() not in ("y", "yes"):
+                console.info("not applied.")
+                continue
+
+        profile = PROFILES[profile_name]
+        console.print()
+        console.rule("APPLY" + (" (dry-run)" if dry else ""))
+        for gi in selected:
+            apply_one(gi, profile, console, dry=dry)
+        render_summary(selected, console)
+        if dry:
+            console.info("dry-run: no files were modified.")
+        # loop back to the menu for another round
+
+
 def run(args) -> int:
-    console = Console(use_rich=not args.no_rich)
+    console = Console(use_rich=not args.no_rich, quiet=getattr(args, "quiet", False))
     if not args.quiet_banner:
         console.banner()
     console.print(C.wrap(
@@ -1102,6 +1307,12 @@ def run(args) -> int:
         console.info(f"library: {lib}")
     games = enumerate_games(libraries, console)
     console.info(f"installed games found: {C.wrap(str(len(games)), C.BOLD)}")
+    if getattr(args, "game", None):
+        matched = filter_games(games, args.game)
+        console.info(f"filter '{args.game}': {len(matched)} of {len(games)} game(s) match")
+        if not matched:
+            console.warn(f"no installed game matches '{args.game}' (appid or name substring)")
+        games = matched
     console.print()
 
     for gi in games:
@@ -1110,6 +1321,13 @@ def run(args) -> int:
         console.debug(f"os/runtime : {osname}/{gi.runtime}" + (f"  prefix={gi.prefix}" if gi.prefix else ""))
         console.debug(f"install    : {gi.install_dir}")
         console.debug(f"engine     : {gi.engine}" + (f" ({gi.engine_detail})" if gi.engine_detail else ""))
+
+    # interactive menu short-circuits the non-interactive flow
+    if getattr(args, "menu", False):
+        if not sys.stdin.isatty():
+            console.err("--menu needs an interactive terminal (stdin is not a TTY).")
+            return 2
+        return interactive_menu(games, steam_root, libraries, console, args.profile)
 
     # restore mode short-circuits mutation
     if args.restore:
@@ -1127,37 +1345,9 @@ def run(args) -> int:
 
     for gi in games:
         if args.report_only:
-            # populate intended target + effect without writing
-            if gi.engine == "unreal":
-                gi.config_target = resolve_unreal_engine_ini(gi)
-                gi.action = "would-tweak" if gi.config_target else "skip"
-                gi.effect = "set r.Streaming.PoolSize / LimitPoolSizeToVRAM" if gi.config_target else "no UE config path"
-            elif gi.engine == "source":
-                gi.config_target = resolve_source_autoexec(gi)
-                gi.action = "would-tweak"
-                gi.effect = f"set mat_picmip {profile['source_mat_picmip']}"
-            elif gi.engine == "source2":
-                gi.action = "manual"
-                gi.effect = "set texture quality in-game (no safe cfg knob)"
-            elif gi.engine == "unity":
-                gi.action = "skip"
-                gi.effect = "no safe config tweak available"
-            else:
-                gi.action = "skip"
-                gi.effect = "unsupported engine"
+            populate_report(gi, profile)
             continue
-
-        console.print(C.wrap(f"▸ {gi.name}", C.BOLD, C.PINK))
-        if gi.engine == "unreal":
-            apply_unreal(gi, profile, console, dry=args.dry_run)
-        elif gi.engine == "source":
-            apply_source(gi, profile, console, dry=args.dry_run)
-        elif gi.engine == "source2":
-            handle_source2(gi, profile, console)
-        elif gi.engine == "unity":
-            handle_unity(gi, console)
-        else:
-            handle_unknown(gi, console)
+        apply_one(gi, profile, console, dry=args.dry_run)
 
     render_summary(games, console)
 
@@ -1176,9 +1366,15 @@ def build_parser() -> argparse.ArgumentParser:
                     "texture quality). Not a texture compressor; unrelated to NVIDIA NTC.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    p.add_argument("--version", action="version", version=f"vramculler {__version__}")
     p.add_argument("--steam-path", help="Path to a Steam root (contains steamapps/). Saved for next time.")
     p.add_argument("--profile", choices=list(PROFILES.keys()), default=DEFAULT_PROFILE,
                    help=f"Tweak aggressiveness (default: {DEFAULT_PROFILE}).")
+    p.add_argument("--game", metavar="NAME|APPID",
+                   help="Only act on games whose appid matches exactly or whose name contains this substring.")
+    p.add_argument("--menu", action="store_true",
+                   help="Interactive menu: detect all games, then pick which to tweak. "
+                        "(Auto-launches when run with no other action flags in a terminal.)")
     p.add_argument("--report-only", action="store_true",
                    help="Audit only: list games/OS/runtime/engine and what would be tweaked. No changes.")
     p.add_argument("--dry-run", action="store_true",
@@ -1186,12 +1382,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--restore", action="store_true",
                    help="Revert all changes from vramculler backups.")
     p.add_argument("--no-rich", action="store_true", help="Force ANSI output even if rich is installed.")
+    p.add_argument("--quiet", action="store_true", help="Suppress per-game debug lines (keep summary).")
     p.add_argument("--quiet-banner", action="store_true", help="Suppress the ASCII banner.")
     return p
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
+    # With no explicit action and an interactive terminal, default to the menu.
+    if (not args.menu and not args.report_only and not args.dry_run
+            and not args.restore and not args.game and sys.stdin.isatty()):
+        args.menu = True
     try:
         return run(args)
     except KeyboardInterrupt:

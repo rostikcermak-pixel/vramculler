@@ -76,14 +76,46 @@ Edit the dict to retune for a different card.
 
 ## Install
 
-Requires **Python 3.10+**. Pure standard library; `rich` is an optional extra
-for prettier tables (it degrades gracefully to ANSI when absent).
+Requires **Python 3.10+** (ships with most Linux distros, SteamOS, and the
+Steam Deck). Pure standard library — nothing to `pip install`. `rich` is an
+optional extra for prettier tables (it degrades gracefully to ANSI when absent).
+
+### Quick install (Linux / Steam Deck) — one command
+
+Installs `vramculler` as a command in `~/.local/bin` (no root, no
+`steamos-readonly disable`; everything stays in your home dir):
 
 ```bash
+mkdir -p ~/.local/bin && \
+curl -L -o ~/.local/bin/vramculler \
+  https://raw.githubusercontent.com/rostikcermak-pixel/vramculler/main/vramculler.py && \
+chmod +x ~/.local/bin/vramculler && \
+grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' ~/.bashrc || \
+  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
+```
+
+Open a new terminal (or `source ~/.bashrc`), then just run:
+
+```bash
+vramculler          # no flags -> interactive menu, auto-detects all games
+```
+
+> **Steam Deck:** do this in Desktop Mode → Konsole. It auto-finds Steam at
+> `~/.local/share/Steam` and reads microSD libraries from `libraryfolders.vdf`.
+
+### Or grab the single file / clone
+
+```bash
+# single file
+curl -LO https://raw.githubusercontent.com/rostikcermak-pixel/vramculler/main/vramculler.py
+python3 vramculler.py
+
+# or the whole repo
 git clone https://github.com/rostikcermak-pixel/vramculler.git
-cd vramculler
+cd vramculler && python3 vramculler.py
+
 # optional, nicer output:
-pip install rich
+pip install --user rich
 ```
 
 No admin/root needed — vramculler only writes user-owned files. If a target
@@ -95,15 +127,62 @@ file isn't writable it is skipped and reported, never escalated.
 
 ```text
 vramculler.py [--steam-path PATH] [--profile {conservative,balanced,aggressive}]
-              [--report-only] [--dry-run] [--restore]
-              [--no-rich] [--quiet-banner]
+              [--game NAME|APPID] [--report-only] [--dry-run] [--restore]
+              [--no-rich] [--quiet] [--quiet-banner] [--version]
 ```
 
-vramculler probes the usual Steam locations automatically (native packages,
-Flatpak `~/.var/app/com.valvesoftware.Steam`, `~/.steam`, `~/.local/share/Steam`
-on Linux; `Program Files (x86)\Steam` on Windows). Use `--steam-path` to point
-at a specific library root; the path is saved for next time. Multiple libraries
-declared in `libraryfolders.vdf` are all scanned.
+| Flag | Purpose |
+| --- | --- |
+| `--menu` | Interactive menu: detect all games, then pick which to tweak. Auto-launches when run with no action flags in a terminal. |
+| `--steam-path PATH` | Point at a Steam root (contains `steamapps/`). Saved for next time. |
+| `--profile` | `conservative` / `balanced` (default) / `aggressive`. |
+| `--game NAME\|APPID` | Only act on games whose appid matches exactly or whose name contains this substring. |
+| `--report-only` | Audit only — no changes, formatted for screenshotting. |
+| `--dry-run` | Show intended changes (incl. backups) but modify nothing. |
+| `--restore` | Revert all changes from backups. |
+| `--quiet` | Suppress per-game debug lines (keep the summary table). |
+| `--no-rich` | Force ANSI output even if `rich` is installed. |
+| `--quiet-banner` | Suppress the ASCII banner. |
+| `--version` | Print the version and exit. |
+
+vramculler probes the usual Steam locations automatically. On Linux that's the
+native package path (`~/.local/share/Steam` / `~/.steam`, used by Arch/CachyOS,
+Fedora and Debian/Ubuntu), a customized `$XDG_DATA_HOME`, Flatpak
+(`~/.var/app/com.valvesoftware.Steam`), the older Debian `debian-installation`
+layout, and Ubuntu Snap (`~/snap/steam/common/...`); on Windows it's
+`Program Files (x86)\Steam`. Use `--steam-path` to point at a specific library
+root; the path is saved for next time. Multiple libraries declared in
+`libraryfolders.vdf` are all scanned.
+
+### Interactive menu (easiest)
+
+Just run it with no flags in a terminal and you get a menu:
+
+```bash
+python3 vramculler.py            # or: python3 vramculler.py --menu
+```
+
+It detects every installed game, lists them numbered with their engine and
+runtime (● = has a safe VRAM knob, ○ = skipped), and lets you:
+
+- select games by number (`1,3`, a range `2-5`, or `all`),
+- switch profile on the fly (`p`),
+- preview as a **dry-run** or **apply** for real (real applies ask for confirmation),
+- **restore/undo** everything (`v`),
+- quit (`q`).
+
+```text
+── DETECTED GAMES ──────────────────────────────────────────────
+   1 ● Stutter Knights UE5   linux/proton   unreal:StutterKnights
+   2 ● Counter Offensive     linux/native   source:csgo
+   3 ○ Voxel Survivor        linux/native   unity
+   ...
+  Actions:
+    [number(s)]  select games to tweak (e.g. 1,3 or 2-5 or 'all')
+    [p] profile (current: balanced)    [v] restore/undo all    [q] quit
+```
+
+Prefer scripting? The non-interactive flags below do the same thing.
 
 ### 1. Audit first (no changes)
 
@@ -193,6 +272,23 @@ Verbose debug output is **on by default**. Per game it prints:
 - Set any cvar/launch option that could raise VAC concerns
 - Guess undocumented engine keys
 - Require or use admin/root, or write to files you don't own
+
+---
+
+## Development & tests
+
+vramculler ships with a stdlib-only test suite that builds synthetic Steam
+install trees (two libraries, one game per supported engine, a Proton prefix) in
+a temp dir, so the full detect → apply → verify → restore pipeline is tested
+**without a real Steam install** — handy if you can't get to your gaming rig.
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+CI (GitHub Actions) runs the suite on **Linux and Windows** across Python
+3.10–3.12, with and without the optional `rich` dependency — cross-platform
+coverage you can't get on a single machine.
 
 ---
 
