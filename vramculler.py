@@ -1071,6 +1071,12 @@ def run(args) -> int:
     console = Console(use_rich=not args.no_rich)
     if not args.quiet_banner:
         console.banner()
+    console.print(C.wrap(
+        "⚠  WORK IN PROGRESS / EXPERIMENTAL - use at your own risk. It edits game "
+        "config files; backups are made but things can still break. The author is "
+        "NOT liable for anything that breaks (no warranty - MIT). Try --report-only "
+        "and --dry-run first.", C.BOLD, C.YELLOW))
+    console.print()
 
     osname = host_os()
     distro = detect_linux_distro() if osname == "linux" else platform.platform()

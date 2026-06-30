@@ -1,5 +1,19 @@
 # vramculler
 
+> # 🚧⚠️ WORK IN PROGRESS — EXPERIMENTAL ⚠️🚧
+>
+> **This is early, experimental, work-in-progress software. USE AT YOUR OWN RISK.**
+>
+> It modifies game config files on your system. It makes timestamped backups and
+> has a `--restore`, but **things can still break.** Always run `--report-only`
+> and `--dry-run` first, and keep your own backups.
+>
+> **The author is NOT responsible or liable for anything that breaks** — corrupted
+> configs, broken game installs, lost settings, VAC/anti-cheat reactions, lost
+> time, or anything else. No warranty of any kind (see the MIT
+> [LICENSE](LICENSE)). If you run it, you accept full responsibility for the
+> outcome.
+
 A cross-platform Python CLI that **reduces VRAM pressure** for installed Steam
 games by applying known-safe, per-engine config tweaks. It edits human-readable
 game config files (Unreal Engine texture-streaming pool, Source texture quality)
