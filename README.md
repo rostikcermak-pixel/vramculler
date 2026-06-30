@@ -101,6 +101,7 @@ vramculler.py [--steam-path PATH] [--profile {conservative,balanced,aggressive}]
 
 | Flag | Purpose |
 | --- | --- |
+| `--menu` | Interactive menu: detect all games, then pick which to tweak. Auto-launches when run with no action flags in a terminal. |
 | `--steam-path PATH` | Point at a Steam root (contains `steamapps/`). Saved for next time. |
 | `--profile` | `conservative` / `balanced` (default) / `aggressive`. |
 | `--game NAME\|APPID` | Only act on games whose appid matches exactly or whose name contains this substring. |
@@ -120,6 +121,36 @@ layout, and Ubuntu Snap (`~/snap/steam/common/...`); on Windows it's
 `Program Files (x86)\Steam`. Use `--steam-path` to point at a specific library
 root; the path is saved for next time. Multiple libraries declared in
 `libraryfolders.vdf` are all scanned.
+
+### Interactive menu (easiest)
+
+Just run it with no flags in a terminal and you get a menu:
+
+```bash
+python3 vramculler.py            # or: python3 vramculler.py --menu
+```
+
+It detects every installed game, lists them numbered with their engine and
+runtime (● = has a safe VRAM knob, ○ = skipped), and lets you:
+
+- select games by number (`1,3`, a range `2-5`, or `all`),
+- switch profile on the fly (`p`),
+- preview as a **dry-run** or **apply** for real (real applies ask for confirmation),
+- **restore/undo** everything (`v`),
+- quit (`q`).
+
+```text
+── DETECTED GAMES ──────────────────────────────────────────────
+   1 ● Stutter Knights UE5   linux/proton   unreal:StutterKnights
+   2 ● Counter Offensive     linux/native   source:csgo
+   3 ○ Voxel Survivor        linux/native   unity
+   ...
+  Actions:
+    [number(s)]  select games to tweak (e.g. 1,3 or 2-5 or 'all')
+    [p] profile (current: balanced)    [v] restore/undo all    [q] quit
+```
+
+Prefer scripting? The non-interactive flags below do the same thing.
 
 ### 1. Audit first (no changes)
 

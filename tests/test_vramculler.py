@@ -377,6 +377,64 @@ class TestWindowsPathResolution(IsolatedEnv):
         self.assertIn("ForestWalker", str(target))
 
 
+class TestMenu(IsolatedEnv):
+    def setUp(self):
+        super().setUp()
+        self.steam, self.lib2 = build_fixture(self.base)
+        self.libs = vc.enumerate_libraries(self.steam, self.console)
+        self.games = vc.enumerate_games(self.libs, self.console)
+        for gi in self.games:
+            vc.detect_engine(gi)
+
+    def test_parse_selection(self):
+        self.assertEqual(vc._parse_selection("1,3", 6), [0, 2])
+        self.assertEqual(vc._parse_selection("2-4", 6), [1, 2, 3])
+        self.assertEqual(vc._parse_selection("all", 6), [0, 1, 2, 3, 4, 5])
+        self.assertEqual(vc._parse_selection("a", 3), [0, 1, 2])
+        self.assertEqual(vc._parse_selection("99", 6), [])      # out of range dropped
+        self.assertEqual(vc._parse_selection("1,1,2", 6), [0, 1])  # de-duped
+        self.assertIsNone(vc._parse_selection("abc", 6))        # unparseable
+
+    def _run_menu(self, answers):
+        it = iter(answers)
+        import builtins
+        saved = builtins.input
+        builtins.input = lambda *a, **k: next(it)
+        try:
+            return vc.interactive_menu(self.games, self.steam, self.libs,
+                                       self.console, "balanced")
+        finally:
+            builtins.input = saved
+
+    def test_menu_real_apply_then_restore(self):
+        # find the Source game's autoexec target
+        src = next(g for g in self.games if g.engine == "source")
+        target = vc.resolve_source_autoexec(src)
+        idx = self.games.index(src) + 1  # 1-based menu number
+
+        # select it -> apply for real -> confirm 'y' -> quit
+        rc = self._run_menu([str(idx), "a", "y", "q"])
+        self.assertEqual(rc, 0)
+        self.assertTrue(target.exists())
+        self.assertIn("mat_picmip 1", target.read_text())
+
+        # now restore via menu: 'v' -> confirm 'y' -> quit
+        rc = self._run_menu(["v", "y", "q"])
+        self.assertEqual(rc, 0)
+        self.assertFalse(target.exists())  # created file removed
+
+    def test_menu_dry_run_writes_nothing(self):
+        src = next(g for g in self.games if g.engine == "source")
+        target = vc.resolve_source_autoexec(src)
+        idx = self.games.index(src) + 1
+        rc = self._run_menu([str(idx), "d", "q"])  # dry-run, no confirm needed
+        self.assertEqual(rc, 0)
+        self.assertFalse(target.exists())
+
+    def test_menu_quit_immediately(self):
+        self.assertEqual(self._run_menu(["q"]), 0)
+
+
 class TestMainSmoke(IsolatedEnv):
     def test_report_only_runs_clean(self):
         steam, _ = build_fixture(self.base)
